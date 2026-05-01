@@ -107,21 +107,34 @@ const tracks = [
 class WebAudioPlayer {
   constructor() {
     this.audioContext = null;
+    this.masterGain = null;
     this.oscillators = [];
-    this.gainNodes = [];
     this.isPlaying = false;
     this.startTime = 0;
     this.pauseTime = 0;
-    this.onTimeUpdate = null;
-    this.onEnded = null;
-    this.duration = 60;
-    this.intervalId = null;
     this.currentTrack = null;
+    this.volume = 0.7;
+    this.isMuted = false;
+    this.schedulerInterval = null;
+    this.lookahead = 25.0;
+    this.scheduleAheadTime = 0.1;
+    this.nextNoteTime = 0.0;
+    this.nextNoteIndex = 0;
+    this.notesPlayed = 0;
+    this.notesPerCycle = 0;
+    this.cycleDuration = 0;
+    this.elapsedInCycle = 0;
+    this.onTimeUpdateCallback = null;
+    this.onEndedCallback = null;
+    this.timeUpdateInterval = null;
   }
 
   initContext() {
     if (!this.audioContext) {
       this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      this.masterGain = this.audioContext.createGain();
+      this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.audioContext.currentTime);
+      this.masterGain.connect(this.audioContext.destination);
     }
     if (this.audioContext.state === 'suspended') {
       this.audioContext.resume();
@@ -146,8 +159,8 @@ class WebAudioPlayer {
     return convolver;
   }
 
-  playNote(freq, startTime, duration, volume = 0.3) {
-    if (!this.audioContext) return;
+  playNote(freq, startTime, duration, noteVolume = 0.3) {
+    if (!this.audioContext || !this.masterGain) return;
 
     const oscillator = this.audioContext.createOscillator();
     const gainNode = this.audioContext.createGain();
@@ -162,19 +175,21 @@ class WebAudioPlayer {
     filter.frequency.setValueAtTime(2000, startTime);
     filter.Q.setValueAtTime(1, startTime);
 
+    const effectiveVolume = noteVolume * (this.isMuted ? 0 : this.volume);
+    
     gainNode.gain.setValueAtTime(0, startTime);
-    gainNode.gain.linearRampToValueAtTime(volume, startTime + 0.05);
-    gainNode.gain.exponentialRampToValueAtTime(volume * 0.7, startTime + duration * 0.3);
+    gainNode.gain.linearRampToValueAtTime(effectiveVolume, startTime + 0.05);
+    gainNode.gain.exponentialRampToValueAtTime(effectiveVolume * 0.7, startTime + duration * 0.3);
     gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
 
     reverbGain.gain.setValueAtTime(0.3, startTime);
 
     oscillator.connect(filter);
     filter.connect(gainNode);
-    gainNode.connect(this.audioContext.destination);
+    gainNode.connect(this.masterGain);
     gainNode.connect(reverb);
     reverb.connect(reverbGain);
-    reverbGain.connect(this.audioContext.destination);
+    reverbGain.connect(this.masterGain);
 
     oscillator.start(startTime);
     oscillator.stop(startTime + duration);
@@ -182,45 +197,68 @@ class WebAudioPlayer {
     this.oscillators.push({ oscillator, stopTime: startTime + duration });
   }
 
-  generateMelody(track, startTime, elapsedTime) {
-    if (!this.audioContext || !track.notes) return;
+  nextNote() {
+    const notes = this.currentTrack.notes;
+    const currentTime = this.audioContext.currentTime;
+    
+    while (this.nextNoteTime < currentTime + this.scheduleAheadTime) {
+      const note = notes[this.nextNoteIndex];
+      this.playNote(note.freq, this.nextNoteTime, note.duration, 0.3);
+      
+      this.nextNoteTime += note.duration;
+      this.notesPlayed++;
+      
+      this.elapsedInCycle += note.duration;
+      if (this.elapsedInCycle >= this.cycleDuration) {
+        this.elapsedInCycle = 0;
+      }
+      
+      this.nextNoteIndex = (this.nextNoteIndex + 1) % notes.length;
+    }
+  }
 
-    const notes = track.notes;
-    const totalNoteDuration = notes.reduce((sum, n) => sum + n.duration, 0);
-    const cycles = Math.floor(elapsedTime / totalNoteDuration);
-    const cycleTime = elapsedTime % totalNoteDuration;
+  scheduler() {
+    this.nextNote();
+    
+    const currentPlayTime = this.audioContext.currentTime - this.startTime;
+    
+    if (currentPlayTime >= this.currentTrack.duration) {
+      this.stop();
+      if (this.onEndedCallback) {
+        this.onEndedCallback();
+      }
+      return;
+    }
+    
+    if (this.onTimeUpdateCallback) {
+      this.onTimeUpdateCallback(currentPlayTime);
+    }
+  }
 
-    let currentTime = 0;
-    let startNoteIndex = 0;
-
+  calculateStartPosition(seekTime) {
+    if (!this.currentTrack) return { noteIndex: 0, elapsedInCycle: 0, notesPlayed: 0 };
+    
+    const notes = this.currentTrack.notes;
+    const noteDuration = this.cycleDuration;
+    
+    const totalCycles = Math.floor(seekTime / noteDuration);
+    const remainingInCycle = seekTime % noteDuration;
+    
+    let noteIndex = 0;
+    let elapsedInCycle = 0;
+    
     for (let i = 0; i < notes.length; i++) {
-      if (currentTime + notes[i].duration > cycleTime) {
-        startNoteIndex = i;
+      if (elapsedInCycle + notes[i].duration > remainingInCycle) {
+        noteIndex = i;
         break;
       }
-      currentTime += notes[i].duration;
+      elapsedInCycle += notes[i].duration;
+      noteIndex = i + 1;
     }
-
-    let playTime = startTime;
-    const noteStartTime = cycleTime - currentTime;
-
-    if (noteStartTime < notes[startNoteIndex].duration) {
-      const remainingDuration = notes[startNoteIndex].duration - noteStartTime;
-      this.playNote(notes[startNoteIndex].freq, playTime, remainingDuration);
-      playTime += remainingDuration;
-    }
-
-    for (let i = startNoteIndex + 1; i < notes.length; i++) {
-      this.playNote(notes[i].freq, playTime, notes[i].duration);
-      playTime += notes[i].duration;
-    }
-
-    for (let cycle = 0; cycle < 5; cycle++) {
-      for (let i = 0; i < notes.length; i++) {
-        this.playNote(notes[i].freq, playTime, notes[i].duration);
-        playTime += notes[i].duration;
-      }
-    }
+    
+    const notesPlayed = totalCycles * notes.length + noteIndex;
+    
+    return { noteIndex, elapsedInCycle, notesPlayed };
   }
 
   play(track, seekTime = 0) {
@@ -228,54 +266,46 @@ class WebAudioPlayer {
     this.stop();
 
     this.currentTrack = track;
-    this.duration = track.duration;
+    this.notesPerCycle = track.notes.length;
+    this.cycleDuration = track.notes.reduce((sum, n) => sum + n.duration, 0);
+    
+    const { noteIndex, elapsedInCycle, notesPlayed } = this.calculateStartPosition(seekTime);
+    this.nextNoteIndex = noteIndex;
+    this.elapsedInCycle = elapsedInCycle;
+    this.notesPlayed = notesPlayed;
+    
     this.isPlaying = true;
     this.startTime = this.audioContext.currentTime - seekTime;
     this.pauseTime = 0;
+    this.nextNoteTime = this.audioContext.currentTime;
 
-    this.generateMelody(track, this.audioContext.currentTime, seekTime);
-
-    this.startTimeUpdate();
-  }
-
-  startTimeUpdate() {
-    this.intervalId = setInterval(() => {
-      if (this.isPlaying && this.onTimeUpdate) {
-        const currentTime = this.audioContext.currentTime - this.startTime;
-        if (currentTime >= this.duration) {
-          this.stop();
-          if (this.onEnded) {
-            this.onEnded();
-          }
-        } else {
-          this.onTimeUpdate(currentTime);
-        }
+    this.schedulerInterval = setInterval(() => {
+      if (this.isPlaying) {
+        this.scheduler();
       }
-    }, 100);
+    }, this.lookahead);
   }
 
   pause() {
     if (!this.isPlaying) return;
     this.isPlaying = false;
     this.pauseTime = this.audioContext.currentTime - this.startTime;
-    this.stopOscillators();
-    if (this.intervalId) {
-      clearInterval(this.intervalId);
-      this.intervalId = null;
+    
+    if (this.schedulerInterval) {
+      clearInterval(this.schedulerInterval);
+      this.schedulerInterval = null;
     }
+    
+    this.stopOscillators();
   }
 
   resume() {
     if (this.isPlaying || !this.currentTrack) return;
-    this.initContext();
-    this.isPlaying = true;
-    this.startTime = this.audioContext.currentTime - this.pauseTime;
-    this.generateMelody(this.currentTrack, this.audioContext.currentTime, this.pauseTime);
-    this.startTimeUpdate();
+    this.play(this.currentTrack, this.pauseTime);
   }
 
   stopOscillators() {
-    this.oscillators.forEach(({ oscillator, stopTime }) => {
+    this.oscillators.forEach(({ oscillator }) => {
       try {
         oscillator.stop();
       } catch (e) {}
@@ -285,29 +315,54 @@ class WebAudioPlayer {
 
   stop() {
     this.isPlaying = false;
-    this.stopOscillators();
-    if (this.intervalId) {
-      clearInterval(this.intervalId);
-      this.intervalId = null;
+    
+    if (this.schedulerInterval) {
+      clearInterval(this.schedulerInterval);
+      this.schedulerInterval = null;
     }
+    
+    if (this.timeUpdateInterval) {
+      clearInterval(this.timeUpdateInterval);
+      this.timeUpdateInterval = null;
+    }
+    
+    this.stopOscillators();
   }
 
   seek(time) {
     if (!this.currentTrack) return;
     const wasPlaying = this.isPlaying;
     this.stop();
+    this.pauseTime = time;
     if (wasPlaying) {
       this.play(this.currentTrack, time);
-    } else {
-      this.pauseTime = time;
+    }
+  }
+
+  setVolume(volume) {
+    this.volume = volume;
+    if (this.masterGain && this.audioContext) {
+      this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : volume, this.audioContext.currentTime);
+    }
+  }
+
+  setMute(muted) {
+    this.isMuted = muted;
+    if (this.masterGain && this.audioContext) {
+      this.masterGain.gain.setValueAtTime(muted ? 0 : this.volume, this.audioContext.currentTime);
     }
   }
 
   getDuration() {
-    return this.duration;
+    return this.currentTrack ? this.currentTrack.duration : 60;
   }
 
-  setVolume(volume) {
+  onTimeUpdate(callback) {
+    this.onTimeUpdateCallback = callback;
+  }
+
+  onEnded(callback) {
+    this.onEndedCallback = callback;
   }
 }
 
@@ -319,17 +374,31 @@ function App() {
   const [volume, setVolume] = useState(0.7);
   const [isMuted, setIsMuted] = useState(false);
   const audioPlayerRef = useRef(null);
+  const isSeeking = useRef(false);
+  const currentTrackIndexRef = useRef(currentTrackIndex);
 
   const currentTrack = tracks[currentTrackIndex];
 
   useEffect(() => {
+    currentTrackIndexRef.current = currentTrackIndex;
+  }, [currentTrackIndex]);
+
+  useEffect(() => {
     audioPlayerRef.current = new WebAudioPlayer();
-    audioPlayerRef.current.onTimeUpdate = (time) => {
-      setCurrentTime(time);
-    };
-    audioPlayerRef.current.onEnded = () => {
-      playNext();
-    };
+    
+    audioPlayerRef.current.onTimeUpdate((time) => {
+      if (!isSeeking.current) {
+        setCurrentTime(time);
+      }
+    });
+    
+    audioPlayerRef.current.onEnded(() => {
+      const nextIndex = (currentTrackIndexRef.current + 1) % tracks.length;
+      setCurrentTrackIndex(nextIndex);
+      setCurrentTime(0);
+      setDuration(tracks[nextIndex].duration);
+      audioPlayerRef.current.play(tracks[nextIndex], 0);
+    });
 
     return () => {
       if (audioPlayerRef.current) {
@@ -351,7 +420,7 @@ function App() {
     if (isPlaying) {
       audioPlayerRef.current.pause();
     } else {
-      if (audioPlayerRef.current.pauseTime > 0) {
+      if (audioPlayerRef.current.pauseTime > 0 || audioPlayerRef.current.isPlaying) {
         audioPlayerRef.current.resume();
       } else {
         audioPlayerRef.current.play(currentTrack);
@@ -383,9 +452,15 @@ function App() {
   const handleProgressChange = (e) => {
     const time = parseFloat(e.target.value);
     setCurrentTime(time);
+    isSeeking.current = true;
+  };
+
+  const handleProgressMouseUp = (e) => {
+    const time = parseFloat(e.target.value);
     if (audioPlayerRef.current) {
       audioPlayerRef.current.seek(time);
     }
+    isSeeking.current = false;
   };
 
   const handleVolumeChange = (e) => {
@@ -394,11 +469,20 @@ function App() {
     if (audioPlayerRef.current) {
       audioPlayerRef.current.setVolume(vol);
     }
-    setIsMuted(vol === 0);
+    if (vol > 0) {
+      setIsMuted(false);
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.setMute(false);
+      }
+    }
   };
 
   const toggleMute = () => {
-    setIsMuted(!isMuted);
+    const newMuted = !isMuted;
+    setIsMuted(newMuted);
+    if (audioPlayerRef.current) {
+      audioPlayerRef.current.setMute(newMuted);
+    }
   };
 
   const progressPercentage = duration > 0 ? (currentTime / duration) * 100 : 0;
@@ -479,6 +563,8 @@ function App() {
                     max={duration || 0}
                     value={currentTime}
                     onChange={handleProgressChange}
+                    onMouseUp={handleProgressMouseUp}
+                    onTouchEnd={handleProgressMouseUp}
                     className="progress-slider"
                   />
                 </div>
@@ -540,7 +626,12 @@ function App() {
                       if (audioPlayerRef.current) {
                         audioPlayerRef.current.setVolume(percent);
                       }
-                      setIsMuted(percent === 0);
+                      if (percent > 0) {
+                        setIsMuted(false);
+                        if (audioPlayerRef.current) {
+                          audioPlayerRef.current.setMute(false);
+                        }
+                      }
                     }}
                   >
                     <div 

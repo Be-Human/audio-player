@@ -178,6 +178,7 @@ class WebAudioPlayer {
   constructor() {
     this.audioContext = null;
     this.masterGain = null;
+    this.analyser = null;
     this.oscillators = [];
     this.isPlaying = false;
     this.startTime = 0;
@@ -203,12 +204,19 @@ class WebAudioPlayer {
     if (!this.audioContext) {
       this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
       this.masterGain = this.audioContext.createGain();
+      this.analyser = this.audioContext.createAnalyser();
+      this.analyser.fftSize = 256;
       this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.audioContext.currentTime);
-      this.masterGain.connect(this.audioContext.destination);
+      this.masterGain.connect(this.analyser);
+      this.analyser.connect(this.audioContext.destination);
     }
     if (this.audioContext.state === 'suspended') {
       this.audioContext.resume();
     }
+  }
+
+  getAnalyser() {
+    return this.analyser;
   }
 
   createReverb() {
@@ -462,6 +470,9 @@ function App() {
   const currentTrackIndexRef = useRef(currentTrackIndex);
   const lyricsContainerRef = useRef(null);
   const playModeRef = useRef(playMode);
+  const analyserRef = useRef(null);
+  const animationFrameRef = useRef(null);
+  const canvasRef = useRef(null);
 
   const currentTrack = tracks[currentTrackIndex];
 
@@ -652,6 +663,38 @@ function App() {
   }, [playMode]);
 
   useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+        return;
+      }
+
+      switch (e.code) {
+        case 'Space':
+          e.preventDefault();
+          togglePlay();
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          playPrevious();
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          playNext();
+          break;
+        case 'KeyM':
+          e.preventDefault();
+          toggleMute();
+          break;
+        default:
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [togglePlay, playPrevious, playNext, toggleMute]);
+
+  useEffect(() => {
     audioPlayerRef.current = new WebAudioPlayer();
     
     audioPlayerRef.current.onTimeUpdate((time) => {
@@ -668,6 +711,9 @@ function App() {
       if (audioPlayerRef.current) {
         audioPlayerRef.current.stop();
       }
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
     };
   }, [handleTrackEnd]);
 
@@ -683,6 +729,84 @@ function App() {
       }
     }
   }, [currentTime, currentTrackIndex, currentTrack.lyrics, getCurrentLyricIndex]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * window.devicePixelRatio;
+    canvas.height = rect.height * window.devicePixelRatio;
+    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+    const drawVisualizer = () => {
+      const analyser = audioPlayerRef.current?.getAnalyser();
+      if (!analyser || !isPlaying) {
+        ctx.clearRect(0, 0, rect.width, rect.height);
+        const barCount = 64;
+        const barWidth = (rect.width - 40) / barCount;
+        const barGap = 1;
+        const minHeight = 8;
+        
+        for (let i = 0; i < barCount; i++) {
+          const barHeight = minHeight + Math.sin(Date.now() / 1000 + i * 0.5) * 4;
+          const x = 20 + i * (barWidth + barGap);
+          const y = (rect.height - barHeight) / 2;
+          
+          const gradient = ctx.createLinearGradient(x, y, x, y + barHeight);
+          gradient.addColorStop(0, 'rgba(29, 185, 84, 0.3)');
+          gradient.addColorStop(1, 'rgba(29, 185, 84, 0.1)');
+          
+          ctx.fillStyle = gradient;
+          ctx.fillRect(x, y, barWidth, barHeight);
+        }
+        
+        if (!isPlaying) {
+          animationFrameRef.current = requestAnimationFrame(drawVisualizer);
+        }
+        return;
+      }
+
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+      analyser.getByteFrequencyData(dataArray);
+
+      ctx.clearRect(0, 0, rect.width, rect.height);
+
+      const barCount = 64;
+      const barWidth = (rect.width - 40) / barCount;
+      const barGap = 1;
+
+      for (let i = 0; i < barCount; i++) {
+        const dataIndex = Math.floor((i / barCount) * bufferLength);
+        const value = dataArray[dataIndex];
+        const barHeight = (value / 255) * (rect.height - 40) + 10;
+        const x = 20 + i * (barWidth + barGap);
+        const y = (rect.height - barHeight) / 2;
+
+        const gradient = ctx.createLinearGradient(x, y, x, y + barHeight);
+        gradient.addColorStop(0, 'rgba(29, 185, 84, 0.9)');
+        gradient.addColorStop(0.5, 'rgba(30, 215, 96, 0.7)');
+        gradient.addColorStop(1, 'rgba(29, 185, 84, 0.3)');
+
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.roundRect(x, y, barWidth, barHeight, 2);
+        ctx.fill();
+      }
+
+      animationFrameRef.current = requestAnimationFrame(drawVisualizer);
+    };
+
+    drawVisualizer();
+
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, [isPlaying]);
 
   const progressPercentage = duration > 0 ? (currentTime / duration) * 100 : 0;
   const volumePercentage = volume * 100;
@@ -753,10 +877,36 @@ function App() {
               </div>
             </div>
           )}
+
+          <div className="shortcuts-section">
+            <h3 className="shortcuts-title">键盘快捷键</h3>
+            <div className="shortcuts-list">
+              <div className="shortcut-item">
+                <kbd className="shortcut-key">空格</kbd>
+                <span className="shortcut-desc">播放/暂停</span>
+              </div>
+              <div className="shortcut-item">
+                <kbd className="shortcut-key">←</kbd>
+                <span className="shortcut-desc">上一首</span>
+              </div>
+              <div className="shortcut-item">
+                <kbd className="shortcut-key">→</kbd>
+                <span className="shortcut-desc">下一首</span>
+              </div>
+              <div className="shortcut-item">
+                <kbd className="shortcut-key">M</kbd>
+                <span className="shortcut-desc">切换静音</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="player-main">
           <div className="player-content">
+            <div className="visualizer-section">
+              <canvas ref={canvasRef} className="visualizer-canvas"></canvas>
+            </div>
+
             <div className="album-art-wrapper">
               <div className={`album-art ${isPlaying ? 'spinning' : ''}`}>
                 <img src={currentTrack.cover} alt={currentTrack.title} />

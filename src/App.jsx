@@ -20,7 +20,21 @@ const tracks = [
       { freq: 261.63, duration: 0.8 },
     ],
     baseNote: 261.63,
-    duration: 60
+    duration: 60,
+    lyrics: [
+      { time: 0, text: '清晨的第一缕阳光' },
+      { time: 5, text: '轻轻洒落在我的脸庞' },
+      { time: 10, text: '鸟儿开始欢快地歌唱' },
+      { time: 15, text: '新的一天已经起航' },
+      { time: 20, text: '微风轻轻吹过脸庞' },
+      { time: 25, text: '带走了昨夜的忧伤' },
+      { time: 30, text: '阳光洒满每一个角落' },
+      { time: 35, text: '温暖着每一颗心房' },
+      { time: 40, text: '让我们一起迎接' },
+      { time: 45, text: '这美好的时光' },
+      { time: 50, text: '未来的路还很长' },
+      { time: 55, text: '让我们携手去闯' },
+    ]
   },
   {
     id: 2,
@@ -40,7 +54,21 @@ const tracks = [
       { freq: 220.00, duration: 0.6 },
     ],
     baseNote: 196.00,
-    duration: 60
+    duration: 60,
+    lyrics: [
+      { time: 0, text: '城市的夜晚霓虹闪烁' },
+      { time: 5, text: '街头的节奏开始跳动' },
+      { time: 10, text: '脚步声伴随着鼓点' },
+      { time: 15, text: '每个人都在追逐梦想' },
+      { time: 20, text: '酒吧里传来萨克斯声' },
+      { time: 25, text: '街角艺人演奏着吉他' },
+      { time: 30, text: '都市的脉搏从未停歇' },
+      { time: 35, text: '人们在音乐中释放自己' },
+      { time: 40, text: '这是属于我们的节奏' },
+      { time: 45, text: '让音符在夜空中飞扬' },
+      { time: 50, text: '城市的故事还在继续' },
+      { time: 55, text: '直到黎明的第一道光' },
+    ]
   },
   {
     id: 3,
@@ -60,7 +88,21 @@ const tracks = [
       { freq: 329.63, duration: 0.8 },
     ],
     baseNote: 329.63,
-    duration: 60
+    duration: 60,
+    lyrics: [
+      { time: 0, text: '穿越星际的旅程' },
+      { time: 5, text: '感受宇宙的浩瀚无垠' },
+      { time: 10, text: '银河在身边缓缓流淌' },
+      { time: 15, text: '星星在远处眨眼微笑' },
+      { time: 20, text: '黑洞边缘的神秘力量' },
+      { time: 25, text: '星云深处的未知世界' },
+      { time: 30, text: '飞船在虚空中自由翱翔' },
+      { time: 35, text: '时间在这里变得缓慢' },
+      { time: 40, text: '让我们一起探索' },
+      { time: 45, text: '这无尽的宇宙奥秘' },
+      { time: 50, text: '带着对未知的好奇' },
+      { time: 55, text: '继续向更深的太空前进' },
+    ]
   },
   {
     id: 4,
@@ -80,7 +122,21 @@ const tracks = [
       { freq: 329.63, duration: 0.8 },
     ],
     baseNote: 293.66,
-    duration: 60
+    duration: 60,
+    lyrics: [
+      { time: 0, text: '清晨的森林一片静谧' },
+      { time: 5, text: '露珠在绿叶上闪烁' },
+      { time: 10, text: '鸟儿开始第一声歌唱' },
+      { time: 15, text: '阳光透过树叶洒下' },
+      { time: 20, text: '溪水潺潺流淌不息' },
+      { time: 25, text: '青苔在石头上蔓延' },
+      { time: 30, text: '蝴蝶在花丛中翩翩起舞' },
+      { time: 35, text: '风儿轻轻吹过树梢' },
+      { time: 40, text: '这是大自然的低语' },
+      { time: 45, text: '诉说着生命的故事' },
+      { time: 50, text: '让我们静静聆听' },
+      { time: 55, text: '感受森林的呼吸' },
+    ]
   },
   {
     id: 5,
@@ -100,7 +156,21 @@ const tracks = [
       { freq: 196.00, duration: 0.8 },
     ],
     baseNote: 174.61,
-    duration: 60
+    duration: 60,
+    lyrics: [
+      { time: 0, text: '蓝色的大海一望无际' },
+      { time: 5, text: '海浪轻轻拍打着沙滩' },
+      { time: 10, text: '海风带来咸咸的气息' },
+      { time: 15, text: '海鸥在天空自由翱翔' },
+      { time: 20, text: '日落时分的金色光芒' },
+      { time: 25, text: '洒在波光粼粼的海面' },
+      { time: 30, text: '远方的船只若隐若现' },
+      { time: 35, text: '带着梦想驶向地平线' },
+      { time: 40, text: '这是大海的呼唤' },
+      { time: 45, text: '讲述着古老的传说' },
+      { time: 50, text: '让我们倾听海浪' },
+      { time: 55, text: '感受大海的心跳' },
+    ]
   }
 ];
 
@@ -308,7 +378,9 @@ class WebAudioPlayer {
     this.oscillators.forEach(({ oscillator }) => {
       try {
         oscillator.stop();
-      } catch (e) {}
+      } catch {
+        // ignore errors when stopping oscillators
+      }
     });
     this.oscillators = [];
   }
@@ -373,63 +445,59 @@ function App() {
   const [duration, setDuration] = useState(60);
   const [volume, setVolume] = useState(0.7);
   const [isMuted, setIsMuted] = useState(false);
+  const [playMode, setPlayMode] = useState('sequence');
+  const [playHistory, setPlayHistory] = useState(() => {
+    const savedHistory = localStorage.getItem('audioPlayerHistory');
+    if (savedHistory) {
+      try {
+        return JSON.parse(savedHistory);
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  });
   const audioPlayerRef = useRef(null);
   const isSeeking = useRef(false);
   const currentTrackIndexRef = useRef(currentTrackIndex);
+  const lyricsContainerRef = useRef(null);
+  const playModeRef = useRef(playMode);
 
   const currentTrack = tracks[currentTrackIndex];
 
-  useEffect(() => {
-    currentTrackIndexRef.current = currentTrackIndex;
-  }, [currentTrackIndex]);
-
-  useEffect(() => {
-    audioPlayerRef.current = new WebAudioPlayer();
+  const getCurrentLyricIndex = useCallback(() => {
+    if (!currentTrack.lyrics || currentTrack.lyrics.length === 0) return 0;
     
-    audioPlayerRef.current.onTimeUpdate((time) => {
-      if (!isSeeking.current) {
-        setCurrentTime(time);
-      }
-    });
-    
-    audioPlayerRef.current.onEnded(() => {
-      const nextIndex = (currentTrackIndexRef.current + 1) % tracks.length;
-      setCurrentTrackIndex(nextIndex);
-      setCurrentTime(0);
-      setDuration(tracks[nextIndex].duration);
-      audioPlayerRef.current.play(tracks[nextIndex], 0);
-    });
-
-    return () => {
-      if (audioPlayerRef.current) {
-        audioPlayerRef.current.stop();
-      }
-    };
-  }, []);
-
-  const formatTime = (time) => {
-    if (isNaN(time)) return '0:00';
-    const minutes = Math.floor(time / 60);
-    const seconds = Math.floor(time % 60);
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-  };
-
-  const togglePlay = useCallback(() => {
-    if (!audioPlayerRef.current) return;
-
-    if (isPlaying) {
-      audioPlayerRef.current.pause();
-    } else {
-      if (audioPlayerRef.current.pauseTime > 0 || audioPlayerRef.current.isPlaying) {
-        audioPlayerRef.current.resume();
-      } else {
-        audioPlayerRef.current.play(currentTrack);
+    for (let i = currentTrack.lyrics.length - 1; i >= 0; i--) {
+      if (currentTime >= currentTrack.lyrics[i].time) {
+        return i;
       }
     }
-    setIsPlaying(!isPlaying);
-  }, [isPlaying, currentTrack]);
+    return 0;
+  }, [currentTrack.lyrics, currentTime]);
 
-  const playTrack = (index) => {
+  const addToHistory = useCallback((trackIndex) => {
+    const track = tracks[trackIndex];
+    const historyItem = {
+      id: track.id,
+      title: track.title,
+      artist: track.artist,
+      cover: track.cover,
+      trackIndex: trackIndex,
+      playedAt: Date.now()
+    };
+
+    setPlayHistory(prev => {
+      let newHistory = [historyItem, ...prev.filter(item => item.id !== track.id)];
+      if (newHistory.length > 10) {
+        newHistory = newHistory.slice(0, 10);
+      }
+      localStorage.setItem('audioPlayerHistory', JSON.stringify(newHistory));
+      return newHistory;
+    });
+  }, []);
+
+  const playTrack = useCallback((index) => {
     if (!audioPlayerRef.current) return;
     
     setCurrentTrackIndex(index);
@@ -437,6 +505,73 @@ function App() {
     setCurrentTime(0);
     setDuration(tracks[index].duration);
     audioPlayerRef.current.play(tracks[index], 0);
+    addToHistory(index);
+  }, [addToHistory]);
+
+  const handleTrackEnd = useCallback(() => {
+    const currentMode = playModeRef.current;
+    const currentIdx = currentTrackIndexRef.current;
+    
+    if (currentMode === 'repeat') {
+      playTrack(currentIdx);
+    } else if (currentMode === 'shuffle') {
+      let nextIndex;
+      do {
+        nextIndex = Math.floor(Math.random() * tracks.length);
+      } while (nextIndex === currentIdx && tracks.length > 1);
+      playTrack(nextIndex);
+    } else {
+      const nextIndex = (currentIdx + 1) % tracks.length;
+      playTrack(nextIndex);
+    }
+  }, [playTrack]);
+
+  const togglePlayMode = () => {
+    const modes = ['sequence', 'repeat', 'shuffle'];
+    const currentIndex = modes.indexOf(playMode);
+    const nextMode = modes[(currentIndex + 1) % modes.length];
+    setPlayMode(nextMode);
+  };
+
+  const getPlayModeIcon = () => {
+    switch (playMode) {
+      case 'repeat':
+        return (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/>
+          </svg>
+        );
+      case 'shuffle':
+        return (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/>
+          </svg>
+        );
+      default:
+        return (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/>
+          </svg>
+        );
+    }
+  };
+
+  const getPlayModeTooltip = () => {
+    switch (playMode) {
+      case 'repeat':
+        return '单曲循环';
+      case 'shuffle':
+        return '随机播放';
+      default:
+        return '列表循环';
+    }
+  };
+
+  const formatTime = (time) => {
+    if (isNaN(time)) return '0:00';
+    const minutes = Math.floor(time / 60);
+    const seconds = Math.floor(time % 60);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
   const playNext = () => {
@@ -485,6 +620,62 @@ function App() {
     }
   };
 
+  const togglePlay = useCallback(() => {
+    if (!audioPlayerRef.current) return;
+
+    if (isPlaying) {
+      audioPlayerRef.current.pause();
+    } else {
+      if (audioPlayerRef.current.pauseTime > 0 || audioPlayerRef.current.isPlaying) {
+        audioPlayerRef.current.resume();
+      } else {
+        audioPlayerRef.current.play(currentTrack);
+      }
+    }
+    setIsPlaying(!isPlaying);
+  }, [isPlaying, currentTrack]);
+
+  useEffect(() => {
+    currentTrackIndexRef.current = currentTrackIndex;
+  }, [currentTrackIndex]);
+
+  useEffect(() => {
+    playModeRef.current = playMode;
+  }, [playMode]);
+
+  useEffect(() => {
+    audioPlayerRef.current = new WebAudioPlayer();
+    
+    audioPlayerRef.current.onTimeUpdate((time) => {
+      if (!isSeeking.current) {
+        setCurrentTime(time);
+      }
+    });
+    
+    audioPlayerRef.current.onEnded(() => {
+      handleTrackEnd();
+    });
+
+    return () => {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.stop();
+      }
+    };
+  }, [handleTrackEnd]);
+
+  useEffect(() => {
+    if (lyricsContainerRef.current && currentTrack.lyrics) {
+      const currentLyricIndex = getCurrentLyricIndex();
+      const lyricElements = lyricsContainerRef.current.querySelectorAll('.lyric-line');
+      if (lyricElements[currentLyricIndex]) {
+        lyricElements[currentLyricIndex].scrollIntoView({
+          behavior: 'smooth',
+          block: 'center'
+        });
+      }
+    }
+  }, [currentTime, currentTrackIndex, currentTrack.lyrics, getCurrentLyricIndex]);
+
   const progressPercentage = duration > 0 ? (currentTime / duration) * 100 : 0;
   const volumePercentage = volume * 100;
 
@@ -524,6 +715,36 @@ function App() {
               </div>
             ))}
           </div>
+
+          {playHistory.length > 0 && (
+            <div className="history-section">
+              <h3 className="history-title">最近播放</h3>
+              <div className="history-list">
+                {playHistory.map((item, index) => (
+                  <div
+                    key={`${item.id}-${index}`}
+                    className={`track-item history-item ${item.trackIndex === currentTrackIndex ? 'active' : ''}`}
+                    onClick={() => playTrack(item.trackIndex)}
+                  >
+                    <div className="track-cover">
+                      <img src={item.cover} alt={item.title} />
+                      {item.trackIndex === currentTrackIndex && isPlaying && (
+                        <div className="playing-indicator">
+                          <span></span>
+                          <span></span>
+                          <span></span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="track-info">
+                      <div className="track-title">{item.title}</div>
+                      <div className="track-artist">{item.artist}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="player-main">
@@ -531,6 +752,26 @@ function App() {
             <div className="album-art-wrapper">
               <div className={`album-art ${isPlaying ? 'spinning' : ''}`}>
                 <img src={currentTrack.cover} alt={currentTrack.title} />
+              </div>
+            </div>
+
+            <div className="lyrics-section">
+              <div className="lyrics-container" ref={lyricsContainerRef}>
+                {currentTrack.lyrics && currentTrack.lyrics.length > 0 ? (
+                  currentTrack.lyrics.map((lyric, index) => {
+                    const currentLyricIndex = getCurrentLyricIndex();
+                    return (
+                      <div
+                        key={index}
+                        className={`lyric-line ${index === currentLyricIndex ? 'active' : ''}`}
+                      >
+                        {lyric.text}
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="lyric-line">暂无歌词</div>
+                )}
               </div>
             </div>
 
@@ -576,6 +817,16 @@ function App() {
             </div>
 
             <div className="controls-section">
+              <div className="play-mode-control">
+                <button 
+                  className={`control-btn play-mode-btn ${playMode !== 'sequence' ? 'active' : ''}`} 
+                  onClick={togglePlayMode}
+                  title={getPlayModeTooltip()}
+                >
+                  {getPlayModeIcon()}
+                </button>
+              </div>
+
               <div className="main-controls">
                 <button className="control-btn prev-btn" onClick={playPrevious}>
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">

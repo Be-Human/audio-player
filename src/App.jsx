@@ -575,8 +575,16 @@ function App() {
   };
 
   const playNext = () => {
-    const nextIndex = (currentTrackIndex + 1) % tracks.length;
-    playTrack(nextIndex);
+    if (playMode === 'shuffle') {
+      let nextIndex;
+      do {
+        nextIndex = Math.floor(Math.random() * tracks.length);
+      } while (nextIndex === currentTrackIndex && tracks.length > 1);
+      playTrack(nextIndex);
+    } else {
+      const nextIndex = (currentTrackIndex + 1) % tracks.length;
+      playTrack(nextIndex);
+    }
   };
 
   const playPrevious = () => {

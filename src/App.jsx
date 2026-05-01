@@ -253,11 +253,11 @@ class WebAudioPlayer {
     filter.frequency.setValueAtTime(2000, startTime);
     filter.Q.setValueAtTime(1, startTime);
 
-    const effectiveVolume = noteVolume * (this.isMuted ? 0 : this.volume);
+    const effectiveVolume = noteVolume * (this.isMuted ? 0.0001 : this.volume);
     
-    gainNode.gain.setValueAtTime(0, startTime);
+    gainNode.gain.setValueAtTime(0.0001, startTime);
     gainNode.gain.linearRampToValueAtTime(effectiveVolume, startTime + 0.05);
-    gainNode.gain.exponentialRampToValueAtTime(effectiveVolume * 0.7, startTime + duration * 0.3);
+    gainNode.gain.exponentialRampToValueAtTime(Math.max(0.0001, effectiveVolume * 0.7), startTime + duration * 0.3);
     gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
 
     reverbGain.gain.setValueAtTime(0.3, startTime);
@@ -740,60 +740,155 @@ function App() {
     canvas.height = rect.height * window.devicePixelRatio;
     ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
 
+    const barCount = 64;
+    const barWidth = (rect.width - 40) / barCount;
+    const barGap = 1;
+    const maxBarHeight = rect.height - 20;
+    const minBarHeight = 8;
+    
+    const smoothedHeights = new Array(barCount).fill(minBarHeight);
+    const targetHeights = new Array(barCount).fill(minBarHeight);
+    
+    const getLogFrequencyIndex = (barIndex, totalBars, totalFrequencyBins) => {
+      const minFreq = 20;
+      const maxFreq = 20000;
+      const minLog = Math.log10(minFreq);
+      const maxLog = Math.log10(maxFreq);
+      const logRange = maxLog - minLog;
+      
+      const freqLog = minLog + (barIndex / totalBars) * logRange;
+      const freq = Math.pow(10, freqLog);
+      
+      const nyquist = audioPlayerRef.current?.audioContext?.sampleRate / 2 || 22050;
+      const binIndex = Math.floor((freq / nyquist) * totalFrequencyBins);
+      
+      return Math.min(Math.max(0, binIndex), totalFrequencyBins - 1);
+    };
+
+    const getAverageValue = (dataArray, startIndex, endIndex) => {
+      let sum = 0;
+      const count = endIndex - startIndex + 1;
+      for (let i = startIndex; i <= endIndex; i++) {
+        sum += dataArray[i] || 0;
+      }
+      return sum / count;
+    };
+
+    let dataArray = null;
+    let bufferLength = 0;
+
     const drawVisualizer = () => {
       const analyser = audioPlayerRef.current?.getAnalyser();
-      if (!analyser || !isPlaying) {
-        ctx.clearRect(0, 0, rect.width, rect.height);
-        const barCount = 64;
-        const barWidth = (rect.width - 40) / barCount;
-        const barGap = 1;
-        const minHeight = 8;
-        
-        for (let i = 0; i < barCount; i++) {
-          const barHeight = minHeight + Math.sin(Date.now() / 1000 + i * 0.5) * 4;
-          const x = 20 + i * (barWidth + barGap);
-          const y = (rect.height - barHeight) / 2;
-          
-          const gradient = ctx.createLinearGradient(x, y, x, y + barHeight);
-          gradient.addColorStop(0, 'rgba(29, 185, 84, 0.3)');
-          gradient.addColorStop(1, 'rgba(29, 185, 84, 0.1)');
-          
-          ctx.fillStyle = gradient;
-          ctx.fillRect(x, y, barWidth, barHeight);
-        }
-        
-        if (!isPlaying) {
-          animationFrameRef.current = requestAnimationFrame(drawVisualizer);
-        }
-        return;
-      }
-
-      const bufferLength = analyser.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
-      analyser.getByteFrequencyData(dataArray);
-
+      const isCurrentlyPlaying = isPlaying && analyser;
+      
       ctx.clearRect(0, 0, rect.width, rect.height);
-
-      const barCount = 64;
-      const barWidth = (rect.width - 40) / barCount;
-      const barGap = 1;
-
+      
+      const time = Date.now() / 1000;
+      
+      if (isCurrentlyPlaying) {
+        bufferLength = analyser.frequencyBinCount;
+        if (!dataArray || dataArray.length !== bufferLength) {
+          dataArray = new Uint8Array(bufferLength);
+        }
+        analyser.getByteFrequencyData(dataArray);
+      }
+      
       for (let i = 0; i < barCount; i++) {
-        const dataIndex = Math.floor((i / barCount) * bufferLength);
-        const value = dataArray[dataIndex];
-        const barHeight = (value / 255) * (rect.height - 40) + 10;
+        if (isCurrentlyPlaying && dataArray) {
+          const logIndex = getLogFrequencyIndex(i, barCount, bufferLength);
+          
+          const binWidth = Math.max(1, Math.floor(bufferLength / (barCount * 2)));
+          const startBin = Math.max(0, logIndex - Math.floor(binWidth / 2));
+          const endBin = Math.min(bufferLength - 1, logIndex + Math.floor(binWidth / 2));
+          
+          let value = getAverageValue(dataArray, startBin, endBin);
+          
+          const position = i / barCount;
+          let freqBoost;
+          if (position < 0.2) {
+            freqBoost = 1.8 + (0.2 - position) * 3;
+          } else if (position < 0.5) {
+            freqBoost = 1.5 + (0.5 - position) * 1;
+          } else if (position < 0.8) {
+            freqBoost = 1.2 + (0.8 - position) * 0.5;
+          } else {
+            freqBoost = 1.0 + (1.0 - position) * 1.5;
+          }
+          
+          value = Math.min(255, value * freqBoost);
+          
+          const dynamicNoise = (Math.sin(time * 5 + i * 0.8) + 1) * 3;
+          value = Math.min(255, Math.max(0, value + dynamicNoise));
+          
+          const randomVariation = (Math.random() - 0.5) * 4;
+          value = Math.min(255, Math.max(0, value + randomVariation));
+          
+          targetHeights[i] = (value / 255) * maxBarHeight + minBarHeight;
+        } else {
+          const baseHeight = minBarHeight;
+          const wave1 = Math.sin(time * 1.5 + i * 0.25) * 8;
+          const wave2 = Math.sin(time * 2.8 + i * 0.4) * 5;
+          const wave3 = Math.cos(time * 1.2 + i * 0.15) * 4;
+          const wave4 = Math.sin(time * 4 + i * 0.6) * 2;
+          targetHeights[i] = baseHeight + wave1 + wave2 + wave3 + wave4;
+        }
+        
+        const smoothingFactor = isCurrentlyPlaying ? 0.12 : 0.06;
+        smoothedHeights[i] += (targetHeights[i] - smoothedHeights[i]) * smoothingFactor;
+        
+        const barHeight = Math.max(minBarHeight, smoothedHeights[i]);
         const x = 20 + i * (barWidth + barGap);
         const y = (rect.height - barHeight) / 2;
-
+        
+        const intensity = Math.min(1, (barHeight - minBarHeight) / (maxBarHeight - minBarHeight));
+        const alpha = isCurrentlyPlaying ? 0.35 + intensity * 0.65 : 0.15 + intensity * 0.15;
+        
         const gradient = ctx.createLinearGradient(x, y, x, y + barHeight);
-        gradient.addColorStop(0, 'rgba(29, 185, 84, 0.9)');
-        gradient.addColorStop(0.5, 'rgba(30, 215, 96, 0.7)');
-        gradient.addColorStop(1, 'rgba(29, 185, 84, 0.3)');
-
+        
+        if (intensity > 0.8) {
+          gradient.addColorStop(0, `rgba(30, 215, 96, ${alpha})`);
+          gradient.addColorStop(0.25, `rgba(29, 185, 84, ${alpha * 0.95})`);
+          gradient.addColorStop(0.5, `rgba(25, 160, 72, ${alpha * 0.85})`);
+          gradient.addColorStop(0.75, `rgba(22, 140, 64, ${alpha * 0.7})`);
+          gradient.addColorStop(1, `rgba(18, 120, 54, ${alpha * 0.4})`);
+        } else if (intensity > 0.5) {
+          gradient.addColorStop(0, `rgba(29, 185, 84, ${alpha})`);
+          gradient.addColorStop(0.3, `rgba(25, 160, 72, ${alpha * 0.9})`);
+          gradient.addColorStop(0.7, `rgba(22, 140, 64, ${alpha * 0.75})`);
+          gradient.addColorStop(1, `rgba(18, 120, 54, ${alpha * 0.5})`);
+        } else if (intensity > 0.2) {
+          gradient.addColorStop(0, `rgba(25, 160, 72, ${alpha})`);
+          gradient.addColorStop(0.5, `rgba(22, 140, 64, ${alpha * 0.85})`);
+          gradient.addColorStop(1, `rgba(18, 120, 54, ${alpha * 0.6})`);
+        } else {
+          gradient.addColorStop(0, `rgba(22, 140, 64, ${alpha})`);
+          gradient.addColorStop(1, `rgba(18, 120, 54, ${alpha * 0.7})`);
+        }
+        
         ctx.fillStyle = gradient;
+        
+        const radius = Math.min(2, barWidth / 2);
         ctx.beginPath();
-        ctx.roundRect(x, y, barWidth, barHeight, 2);
+        ctx.moveTo(x + radius, y);
+        ctx.lineTo(x + barWidth - radius, y);
+        ctx.quadraticCurveTo(x + barWidth, y, x + barWidth, y + radius);
+        ctx.lineTo(x + barWidth, y + barHeight - radius);
+        ctx.quadraticCurveTo(x + barWidth, y + barHeight, x + barWidth - radius, y + barHeight);
+        ctx.lineTo(x + radius, y + barHeight);
+        ctx.quadraticCurveTo(x, y + barHeight, x, y + barHeight - radius);
+        ctx.lineTo(x, y + radius);
+        ctx.quadraticCurveTo(x, y, x + radius, y);
+        ctx.closePath();
         ctx.fill();
+        
+        if (isCurrentlyPlaying && intensity > 0.4) {
+          const glowAlpha = intensity * 0.4;
+          const glowBlur = 8 + intensity * 6;
+          ctx.shadowBlur = glowBlur;
+          ctx.shadowColor = `rgba(30, 215, 96, ${glowAlpha})`;
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        }
       }
 
       animationFrameRef.current = requestAnimationFrame(drawVisualizer);

@@ -198,6 +198,10 @@ class WebAudioPlayer {
     this.onTimeUpdateCallback = null;
     this.onEndedCallback = null;
     this.timeUpdateInterval = null;
+    
+    this.isLocalFile = false;
+    this.audioElement = null;
+    this.mediaElementSource = null;
   }
 
   initContext() {
@@ -344,6 +348,16 @@ class WebAudioPlayer {
     this.stop();
 
     this.currentTrack = track;
+    this.isLocalFile = !!track.isLocalFile;
+    
+    if (this.isLocalFile) {
+      this.playLocalFile(track, seekTime);
+    } else {
+      this.playSynthesized(track, seekTime);
+    }
+  }
+  
+  playSynthesized(track, seekTime = 0) {
     this.notesPerCycle = track.notes.length;
     this.cycleDuration = track.notes.reduce((sum, n) => sum + n.duration, 0);
     
@@ -363,23 +377,82 @@ class WebAudioPlayer {
       }
     }, this.lookahead);
   }
+  
+  playLocalFile(track, seekTime = 0) {
+    if (!this.audioElement) {
+      this.audioElement = new Audio();
+    }
+    
+    this.audioElement.src = track.audioUrl;
+    this.audioElement.volume = this.isMuted ? 0 : this.volume;
+    
+    if (!this.mediaElementSource) {
+      this.mediaElementSource = this.audioContext.createMediaElementSource(this.audioElement);
+      this.mediaElementSource.connect(this.masterGain);
+    }
+    
+    this.audioElement.addEventListener('loadedmetadata', () => {
+      this.currentTrack.duration = this.audioElement.duration;
+      if (seekTime > 0) {
+        this.audioElement.currentTime = seekTime;
+      }
+    });
+    
+    this.audioElement.addEventListener('timeupdate', () => {
+      if (this.onTimeUpdateCallback) {
+        this.onTimeUpdateCallback(this.audioElement.currentTime);
+      }
+    });
+    
+    this.audioElement.addEventListener('ended', () => {
+      this.isPlaying = false;
+      if (this.onEndedCallback) {
+        this.onEndedCallback();
+      }
+    });
+    
+    this.isPlaying = true;
+    this.pauseTime = seekTime;
+    
+    if (seekTime > 0) {
+      this.audioElement.currentTime = seekTime;
+    }
+    
+    this.audioElement.play().catch(err => {
+      console.error('Error playing audio:', err);
+    });
+  }
 
   pause() {
     if (!this.isPlaying) return;
     this.isPlaying = false;
-    this.pauseTime = this.audioContext.currentTime - this.startTime;
     
-    if (this.schedulerInterval) {
-      clearInterval(this.schedulerInterval);
-      this.schedulerInterval = null;
+    if (this.isLocalFile) {
+      this.pauseTime = this.audioElement.currentTime;
+      this.audioElement.pause();
+    } else {
+      this.pauseTime = this.audioContext.currentTime - this.startTime;
+      
+      if (this.schedulerInterval) {
+        clearInterval(this.schedulerInterval);
+        this.schedulerInterval = null;
+      }
+      
+      this.stopOscillators();
     }
-    
-    this.stopOscillators();
   }
 
   resume() {
     if (this.isPlaying || !this.currentTrack) return;
-    this.play(this.currentTrack, this.pauseTime);
+    
+    if (this.isLocalFile && this.audioElement) {
+      this.isPlaying = true;
+      this.audioElement.play().catch(err => {
+        console.error('Error resuming audio:', err);
+      });
+    } else {
+      this.play(this.currentTrack, this.pauseTime);
+    }
   }
 
   stopOscillators() {
@@ -396,26 +469,37 @@ class WebAudioPlayer {
   stop() {
     this.isPlaying = false;
     
-    if (this.schedulerInterval) {
-      clearInterval(this.schedulerInterval);
-      this.schedulerInterval = null;
+    if (this.isLocalFile && this.audioElement) {
+      this.audioElement.pause();
+      this.audioElement.currentTime = 0;
+    } else {
+      if (this.schedulerInterval) {
+        clearInterval(this.schedulerInterval);
+        this.schedulerInterval = null;
+      }
+      
+      if (this.timeUpdateInterval) {
+        clearInterval(this.timeUpdateInterval);
+        this.timeUpdateInterval = null;
+      }
+      
+      this.stopOscillators();
     }
-    
-    if (this.timeUpdateInterval) {
-      clearInterval(this.timeUpdateInterval);
-      this.timeUpdateInterval = null;
-    }
-    
-    this.stopOscillators();
   }
 
   seek(time) {
     if (!this.currentTrack) return;
-    const wasPlaying = this.isPlaying;
-    this.stop();
-    this.pauseTime = time;
-    if (wasPlaying) {
-      this.play(this.currentTrack, time);
+    
+    if (this.isLocalFile && this.audioElement) {
+      this.audioElement.currentTime = time;
+      this.pauseTime = time;
+    } else {
+      const wasPlaying = this.isPlaying;
+      this.stop();
+      this.pauseTime = time;
+      if (wasPlaying) {
+        this.play(this.currentTrack, time);
+      }
     }
   }
 
@@ -424,12 +508,18 @@ class WebAudioPlayer {
     if (this.masterGain && this.audioContext) {
       this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : volume, this.audioContext.currentTime);
     }
+    if (this.audioElement) {
+      this.audioElement.volume = this.isMuted ? 0 : volume;
+    }
   }
 
   setMute(muted) {
     this.isMuted = muted;
     if (this.masterGain && this.audioContext) {
       this.masterGain.gain.setValueAtTime(muted ? 0 : this.volume, this.audioContext.currentTime);
+    }
+    if (this.audioElement) {
+      this.audioElement.volume = muted ? 0 : this.volume;
     }
   }
 
@@ -465,6 +555,7 @@ function App() {
     }
     return [];
   });
+  const [localTracks, setLocalTracks] = useState([]);
   const audioPlayerRef = useRef(null);
   const isSeeking = useRef(false);
   const currentTrackIndexRef = useRef(currentTrackIndex);
@@ -473,8 +564,10 @@ function App() {
   const analyserRef = useRef(null);
   const animationFrameRef = useRef(null);
   const canvasRef = useRef(null);
+  const fileInputRef = useRef(null);
 
-  const currentTrack = tracks[currentTrackIndex];
+  const allTracks = [...tracks, ...localTracks];
+  const currentTrack = allTracks[currentTrackIndex];
 
   const getCurrentLyricIndex = useCallback(() => {
     if (!currentTrack.lyrics || currentTrack.lyrics.length === 0) return 0;
@@ -485,10 +578,10 @@ function App() {
       }
     }
     return 0;
-  }, [currentTrack.lyrics, currentTime]);
+  }, [currentTrack, currentTime]);
 
   const addToHistory = useCallback((trackIndex) => {
-    const track = tracks[trackIndex];
+    const track = allTracks[trackIndex];
     const historyItem = {
       id: track.id,
       title: track.title,
@@ -506,7 +599,7 @@ function App() {
       localStorage.setItem('audioPlayerHistory', JSON.stringify(newHistory));
       return newHistory;
     });
-  }, []);
+  }, [allTracks]);
 
   const playTrack = useCallback((index) => {
     if (!audioPlayerRef.current) return;
@@ -514,10 +607,10 @@ function App() {
     setCurrentTrackIndex(index);
     setIsPlaying(true);
     setCurrentTime(0);
-    setDuration(tracks[index].duration);
-    audioPlayerRef.current.play(tracks[index], 0);
+    setDuration(allTracks[index].duration);
+    audioPlayerRef.current.play(allTracks[index], 0);
     addToHistory(index);
-  }, [addToHistory]);
+  }, [allTracks, addToHistory]);
 
   const handleTrackEnd = useCallback(() => {
     const currentMode = playModeRef.current;
@@ -528,14 +621,58 @@ function App() {
     } else if (currentMode === 'shuffle') {
       let nextIndex;
       do {
-        nextIndex = Math.floor(Math.random() * tracks.length);
-      } while (nextIndex === currentIdx && tracks.length > 1);
+        nextIndex = Math.floor(Math.random() * allTracks.length);
+      } while (nextIndex === currentIdx && allTracks.length > 1);
       playTrack(nextIndex);
     } else {
-      const nextIndex = (currentIdx + 1) % tracks.length;
+      const nextIndex = (currentIdx + 1) % allTracks.length;
       playTrack(nextIndex);
     }
-  }, [playTrack]);
+  }, [playTrack, allTracks.length]);
+
+  const handleFileSelect = useCallback((e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const newTracks = [];
+    let idCounter = 1000 + localTracks.length;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      
+      if (!file.type.startsWith('audio/')) continue;
+
+      const audioUrl = URL.createObjectURL(file);
+      const fileName = file.name.replace(/\.[^/.]+$/, '');
+
+      const newTrack = {
+        id: idCounter++,
+        title: fileName,
+        artist: '本地音乐',
+        cover: 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&q=80&w=300&h=300',
+        isLocalFile: true,
+        audioUrl: audioUrl,
+        duration: 0,
+        lyrics: []
+      };
+
+      newTracks.push(newTrack);
+    }
+
+    if (newTracks.length > 0) {
+      setLocalTracks(prev => [...prev, ...newTracks]);
+    }
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }, [localTracks.length]);
+
+  const openFileSelector = useCallback(() => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  }, []);
 
   const togglePlayMode = () => {
     const modes = ['sequence', 'repeat', 'shuffle'];
@@ -589,17 +726,17 @@ function App() {
     if (playMode === 'shuffle') {
       let nextIndex;
       do {
-        nextIndex = Math.floor(Math.random() * tracks.length);
-      } while (nextIndex === currentTrackIndex && tracks.length > 1);
+        nextIndex = Math.floor(Math.random() * allTracks.length);
+      } while (nextIndex === currentTrackIndex && allTracks.length > 1);
       playTrack(nextIndex);
     } else {
-      const nextIndex = (currentTrackIndex + 1) % tracks.length;
+      const nextIndex = (currentTrackIndex + 1) % allTracks.length;
       playTrack(nextIndex);
     }
   };
 
   const playPrevious = () => {
-    const prevIndex = (currentTrackIndex - 1 + tracks.length) % tracks.length;
+    const prevIndex = (currentTrackIndex - 1 + allTracks.length) % allTracks.length;
     playTrack(prevIndex);
   };
 
@@ -910,12 +1047,27 @@ function App() {
     <div className="app-container">
       <div className="main-layout">
         <div className="playlist-sidebar">
-          <h2 className="playlist-title">播放列表</h2>
+          <div className="playlist-header">
+            <h2 className="playlist-title">播放列表</h2>
+            <button className="add-music-btn" onClick={openFileSelector} title="添加本地音乐">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+              </svg>
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="audio/*"
+              multiple
+              style={{ display: 'none' }}
+              onChange={handleFileSelect}
+            />
+          </div>
           <div className="track-list">
-            {tracks.map((track, index) => (
+            {allTracks.map((track, index) => (
               <div
                 key={track.id}
-                className={`track-item ${index === currentTrackIndex ? 'active' : ''}`}
+                className={`track-item ${index === currentTrackIndex ? 'active' : ''} ${track.isLocalFile ? 'local-track' : ''}`}
                 onClick={() => playTrack(index)}
               >
                 <div className="track-cover">
@@ -930,7 +1082,10 @@ function App() {
                 </div>
                 <div className="track-info">
                   <div className="track-title">{track.title}</div>
-                  <div className="track-artist">{track.artist}</div>
+                  <div className="track-artist">
+                    {track.isLocalFile && <span className="local-badge">本地</span>}
+                    {track.artist}
+                  </div>
                 </div>
                 <div className="track-number">
                   {index === currentTrackIndex && isPlaying ? (

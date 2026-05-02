@@ -197,11 +197,16 @@ class WebAudioPlayer {
     this.elapsedInCycle = 0;
     this.onTimeUpdateCallback = null;
     this.onEndedCallback = null;
+    this.onLoadedMetadataCallback = null;
     this.timeUpdateInterval = null;
     
     this.isLocalFile = false;
     this.audioElement = null;
     this.mediaElementSource = null;
+    
+    this.boundHandleLoadedMetadata = null;
+    this.boundHandleTimeUpdate = null;
+    this.boundHandleEnded = null;
   }
 
   initContext() {
@@ -381,46 +386,58 @@ class WebAudioPlayer {
   playLocalFile(track, seekTime = 0) {
     if (!this.audioElement) {
       this.audioElement = new Audio();
+      this.boundHandleLoadedMetadata = this.handleLoadedMetadata.bind(this);
+      this.boundHandleTimeUpdate = this.handleTimeUpdate.bind(this);
+      this.boundHandleEnded = this.handleEnded.bind(this);
+      
+      this.audioElement.addEventListener('loadedmetadata', this.boundHandleLoadedMetadata);
+      this.audioElement.addEventListener('timeupdate', this.boundHandleTimeUpdate);
+      this.audioElement.addEventListener('ended', this.boundHandleEnded);
     }
     
     this.audioElement.src = track.audioUrl;
     this.audioElement.volume = this.isMuted ? 0 : this.volume;
+    this._pendingSeekTime = seekTime;
     
     if (!this.mediaElementSource) {
       this.mediaElementSource = this.audioContext.createMediaElementSource(this.audioElement);
       this.mediaElementSource.connect(this.masterGain);
     }
     
-    this.audioElement.addEventListener('loadedmetadata', () => {
-      this.currentTrack.duration = this.audioElement.duration;
-      if (seekTime > 0) {
-        this.audioElement.currentTime = seekTime;
-      }
-    });
-    
-    this.audioElement.addEventListener('timeupdate', () => {
-      if (this.onTimeUpdateCallback) {
-        this.onTimeUpdateCallback(this.audioElement.currentTime);
-      }
-    });
-    
-    this.audioElement.addEventListener('ended', () => {
-      this.isPlaying = false;
-      if (this.onEndedCallback) {
-        this.onEndedCallback();
-      }
-    });
-    
     this.isPlaying = true;
     this.pauseTime = seekTime;
-    
-    if (seekTime > 0) {
-      this.audioElement.currentTime = seekTime;
-    }
     
     this.audioElement.play().catch(err => {
       console.error('Error playing audio:', err);
     });
+  }
+  
+  handleLoadedMetadata() {
+    if (this.currentTrack) {
+      this.currentTrack.duration = this.audioElement.duration;
+    }
+    
+    if (this._pendingSeekTime !== undefined && this._pendingSeekTime > 0) {
+      this.audioElement.currentTime = this._pendingSeekTime;
+      this._pendingSeekTime = undefined;
+    }
+    
+    if (this.onLoadedMetadataCallback) {
+      this.onLoadedMetadataCallback(this.audioElement.duration);
+    }
+  }
+  
+  handleTimeUpdate() {
+    if (this.onTimeUpdateCallback) {
+      this.onTimeUpdateCallback(this.audioElement.currentTime);
+    }
+  }
+  
+  handleEnded() {
+    this.isPlaying = false;
+    if (this.onEndedCallback) {
+      this.onEndedCallback();
+    }
   }
 
   pause() {
@@ -533,6 +550,10 @@ class WebAudioPlayer {
 
   onEnded(callback) {
     this.onEndedCallback = callback;
+  }
+
+  onLoadedMetadata(callback) {
+    this.onLoadedMetadataCallback = callback;
   }
 }
 
@@ -842,6 +863,10 @@ function App() {
     
     audioPlayerRef.current.onEnded(() => {
       handleTrackEnd();
+    });
+    
+    audioPlayerRef.current.onLoadedMetadata((duration) => {
+      setDuration(duration);
     });
 
     return () => {

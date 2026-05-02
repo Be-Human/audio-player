@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import './App.css';
 
 const tracks = [
@@ -587,7 +587,7 @@ function App() {
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  const allTracks = [...tracks, ...localTracks];
+  const allTracks = useMemo(() => [...tracks, ...localTracks], [localTracks]);
   const currentTrack = allTracks[currentTrackIndex];
 
   const getCurrentLyricIndex = useCallback(() => {
@@ -812,6 +812,20 @@ function App() {
     setIsPlaying(!isPlaying);
   }, [isPlaying, currentTrack]);
 
+  const handleTrackEndRef = useRef(handleTrackEnd);
+  const togglePlayRef = useRef(togglePlay);
+  const playPreviousRef = useRef(playPrevious);
+  const playNextRef = useRef(playNext);
+  const toggleMuteRef = useRef(toggleMute);
+  
+  useEffect(() => {
+    handleTrackEndRef.current = handleTrackEnd;
+    togglePlayRef.current = togglePlay;
+    playPreviousRef.current = playPrevious;
+    playNextRef.current = playNext;
+    toggleMuteRef.current = toggleMute;
+  }, [handleTrackEnd, togglePlay, playPrevious, playNext, toggleMute]);
+
   useEffect(() => {
     currentTrackIndexRef.current = currentTrackIndex;
   }, [currentTrackIndex]);
@@ -829,19 +843,19 @@ function App() {
       switch (e.code) {
         case 'Space':
           e.preventDefault();
-          togglePlay();
+          togglePlayRef.current();
           break;
         case 'ArrowLeft':
           e.preventDefault();
-          playPrevious();
+          playPreviousRef.current();
           break;
         case 'ArrowRight':
           e.preventDefault();
-          playNext();
+          playNextRef.current();
           break;
         case 'KeyM':
           e.preventDefault();
-          toggleMute();
+          toggleMuteRef.current();
           break;
         default:
           break;
@@ -850,7 +864,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [togglePlay, playPrevious, playNext, toggleMute]);
+  }, []);
 
   useEffect(() => {
     audioPlayerRef.current = new WebAudioPlayer();
@@ -862,7 +876,7 @@ function App() {
     });
     
     audioPlayerRef.current.onEnded(() => {
-      handleTrackEnd();
+      handleTrackEndRef.current();
     });
     
     audioPlayerRef.current.onLoadedMetadata((duration) => {
@@ -877,7 +891,7 @@ function App() {
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [handleTrackEnd]);
+  }, []);
 
   useEffect(() => {
     if (lyricsContainerRef.current && currentTrack.lyrics) {
